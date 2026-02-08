@@ -1,7 +1,9 @@
 [project]
 name = "mood-board"
 version = "0.1.0"
-description = "Add your description here"
+description = "WhatsApp chat mood analysis using AI"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "requests>=2.31.0",
+]
