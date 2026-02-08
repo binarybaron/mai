@@ -1,6 +1,7 @@
 import json
 import hashlib
 import os
+import threading
 import requests
 from typing import Optional
 from config import OPENROUTER_API_KEY, MODEL_NAME, OPENROUTER_API_URL, CACHE_FILE
@@ -9,6 +10,7 @@ from config import OPENROUTER_API_KEY, MODEL_NAME, OPENROUTER_API_URL, CACHE_FIL
 class LLMCache:
     def __init__(self, cache_file: str = CACHE_FILE):
         self.cache_file = cache_file
+        self._lock = threading.Lock()
         self.cache = self._load_cache()
 
     def _load_cache(self) -> dict:
@@ -22,9 +24,10 @@ class LLMCache:
         return {}
 
     def _save_cache(self):
-        """Save cache to JSON file"""
-        with open(self.cache_file, 'w', encoding='utf-8') as f:
-            json.dump(self.cache, f, indent=2, ensure_ascii=False)
+        """Save cache to JSON file (thread-safe)"""
+        with self._lock:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, indent=2, ensure_ascii=False)
 
     def _get_cache_key(self, text: str, model: str) -> str:
         """Generate cache key from text and model name"""
@@ -32,14 +35,16 @@ class LLMCache:
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
     def get(self, text: str, model: str) -> Optional[str]:
-        """Get cached response"""
+        """Get cached response (thread-safe)"""
         cache_key = self._get_cache_key(text, model)
-        return self.cache.get(cache_key)
+        with self._lock:
+            return self.cache.get(cache_key)
 
     def set(self, text: str, model: str, response: str):
-        """Set cached response"""
+        """Set cached response (thread-safe)"""
         cache_key = self._get_cache_key(text, model)
-        self.cache[cache_key] = response
+        with self._lock:
+            self.cache[cache_key] = response
         self._save_cache()
 
 
@@ -99,4 +104,11 @@ def call_llm(text: str, system_prompt: str = "", model: str = MODEL_NAME) -> str
         return llm_response
 
     except requests.exceptions.RequestException as e:
-        raise Exception(f"LLM API call failed: {e}")
+        # Try to get error details from response
+        error_detail = ""
+        try:
+            if hasattr(e, 'response') and e.response is not None:
+                error_detail = f"\nResponse: {e.response.text}"
+        except:
+            pass
+        raise Exception(f"LLM API call failed: {e}{error_detail}")

@@ -7,7 +7,9 @@ state over time using LLM-based analysis.
 """
 
 import os
+import sys
 import json
+import argparse
 from datetime import datetime
 from archive_processor import ArchiveProcessor
 from week_grouper import WeekGrouper
@@ -74,10 +76,30 @@ def save_results(weekly_analyses: dict, sentiment_scores: dict, overall_summary:
 
 def main():
     """Main execution function"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="Analyze WhatsApp chat exports to understand emotional patterns over time."
+    )
+    parser.add_argument(
+        "--weeks",
+        type=int,
+        default=4,
+        help="Number of most recent weeks to analyze (default: 4)"
+    )
+    parser.add_argument(
+        "--concurrency", "-c",
+        type=int,
+        default=5,
+        help="Number of concurrent LLM requests (default: 5)"
+    )
+    args = parser.parse_args()
+
     print("=" * 80)
     print("Mood Board - WhatsApp Chat Analysis")
     print("=" * 80)
     print(f"Target user: {TARGET_USER}")
+    print(f"Analyzing last {args.weeks} weeks")
+    print(f"Concurrency: {args.concurrency} workers")
     print("")
 
     # Step 1: Process all archives and extract messages
@@ -99,7 +121,16 @@ def main():
     print("\n[2/5] Grouping messages by week...")
     grouper = WeekGrouper(TARGET_USER)
     weeks_data = grouper.get_weekly_summaries(all_messages)
-    print(f"Found {len(weeks_data)} weeks")
+    print(f"Found {len(weeks_data)} weeks total")
+
+    # Filter to last N weeks
+    all_week_keys = sorted(weeks_data.keys())
+    if args.weeks > 0 and args.weeks < len(all_week_keys):
+        selected_weeks = all_week_keys[-args.weeks:]
+        weeks_data = {k: weeks_data[k] for k in selected_weeks}
+        print(f"Analyzing {len(weeks_data)} most recent weeks: {selected_weeks[0]} to {selected_weeks[-1]}")
+    else:
+        print(f"Analyzing all {len(weeks_data)} weeks")
 
     # Print summary of each week
     for week_key in sorted(weeks_data.keys()):
@@ -110,12 +141,12 @@ def main():
     # Step 3: Analyze each week
     print("\n[3/5] Analyzing weekly conversations...")
     analyzer = WeeklyAnalyzer(TARGET_USER)
-    weekly_analyses = analyzer.analyze_all_weeks(weeks_data)
+    weekly_analyses = analyzer.analyze_all_weeks(weeks_data, max_workers=args.concurrency)
 
     # Step 4: Perform sentiment analysis
     print("\n[4/5] Performing sentiment analysis...")
     sentiment_analyzer = SentimentAnalyzer(TARGET_USER)
-    sentiment_scores = sentiment_analyzer.analyze_sentiment(weekly_analyses)
+    sentiment_scores = sentiment_analyzer.analyze_sentiment(weekly_analyses, max_workers=args.concurrency)
 
     # Print sentiment scores
     print("\nSentiment Scores (0=happy, 10=depressed):")
@@ -127,8 +158,9 @@ def main():
     print("\n[5/5] Generating overall summary...")
     overall_summary = sentiment_analyzer.generate_overall_summary(weekly_analyses, sentiment_scores)
 
-    # Save results
-    save_results(weekly_analyses, sentiment_scores, overall_summary)
+    # Save results to datetime-named folder
+    output_dir = os.path.join("output", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    save_results(weekly_analyses, sentiment_scores, overall_summary, output_dir)
 
     print("\n" + "=" * 80)
     print("Analysis complete!")
